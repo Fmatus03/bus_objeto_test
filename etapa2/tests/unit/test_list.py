@@ -1,243 +1,277 @@
-"""
-test_list.py — Pruebas Unitarias: list_obj.py
-Bus de Objetos — Etapa 2 | Arnés 100% nativo (sin frameworks externos)
+import unittest
+import sys
+import os
 
-Clases de equivalencia:
-  CE-L1 [Válida]   lst válido, parámetros en rango
-  CE-L2 [Inválida] lst es None → LIST_NULL_PTR
-  CE-L3 [Límite-]  pos = -1 → OUT_OF_BOUNDS
-  CE-L4 [Límite+]  pos = size → OUT_OF_BOUNDS
-  CE-L5 [Borde]    pos = 0 (primer elemento)
-  CE-L6 [Borde]    pos = size-1 (último elemento)
-  CE-L7 [Especial] lista de un solo elemento
-  CE-L8 [Especial] lista vacía
-"""
-import sys, os
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, _ROOT)
+# Ajustar PYTHONPATH para permitir la importación desde src
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from src.objects.list_obj import (
+from objects.list_obj import (
+    List,
     list_create, list_destroy, list_insert, list_remove,
-    list_get, list_size, list_contains, list_clear,
-    LIST_OK, LIST_NULL_PTR, LIST_OUT_OF_BOUNDS,
+    list_clear, list_get, list_size, list_contains,
+    LIST_OK, LIST_NULL_PTR, LIST_OUT_OF_BOUNDS
 )
-from tests.unit.test_harness import TestSuite, assert_equal, assert_not_none, assert_true
 
-INT_MIN = -(2**31)
-INT_MAX =  (2**31) - 1
-suite   = TestSuite("list_obj.py")
+class TestListCreate(unittest.TestCase):
+    def test_list_create_returns_instance(self):
+        """[Clase Válida] Verifica que retorne una instancia de List."""
+        lst = list_create()
+        self.assertIsInstance(lst, List)
 
-# ── list_create / list_destroy ──────────────────────────────
-suite.run("TC-L-001","create: retorna objeto no-None con size=0",
-    lambda: (assert_not_none(list_create()), assert_equal(list_size(list_create()), 0)))
+    def test_list_create_initial_size(self):
+        """[Límite Inferior] Verifica que el tamaño inicial sea 0."""
+        lst = list_create()
+        self.assertEqual(lst.size, 0)
 
-suite.run("TC-L-002","create: dos instancias distintas",
-    lambda: assert_true(list_create() is not list_create()))
+    def test_list_create_initial_head_tail(self):
+        """[Estado Interno] Verifica que cabeza y cola estén limpios."""
+        lst = list_create()
+        self.assertIsNone(lst._head)
+        self.assertIsNone(lst._tail)
 
-suite.run("TC-L-003","destroy: OK en lista con elementos",
-    lambda: assert_equal(list_destroy((lambda l: [list_insert(l,1), l][1])(list_create())), LIST_OK))
+    def test_list_create_lock_exists(self):
+        """[Concurrencia] Verifica la existencia del cerrojo (Lock)."""
+        lst = list_create()
+        self.assertTrue(hasattr(lst, '_lock'))
 
-suite.run("TC-L-004","destroy: None → LIST_NULL_PTR",
-    lambda: assert_equal(list_destroy(None), LIST_NULL_PTR))
+    def test_list_create_multiple_instances(self):
+        """[Clase Válida] Verifica que instancias distintas sean independientes."""
+        lst1 = list_create()
+        lst2 = list_create()
+        self.assertIsNot(lst1, lst2)
 
-suite.run("TC-L-005","destroy: lista vacía → LIST_OK",
-    lambda: assert_equal(list_destroy(list_create()), LIST_OK))
+class TestListDestroy(unittest.TestCase):
+    def test_list_destroy_valid(self):
+        """[Clase Válida] Destruir una lista con elementos."""
+        lst = list_create()
+        list_insert(lst, 10)
+        ret = list_destroy(lst)
+        self.assertEqual(ret, LIST_OK)
 
-# ── list_insert ─────────────────────────────────────────────
-def _t_insert_ok():
-    l = list_create(); list_insert(l, 42)
-    assert_equal(list_size(l), 1)
-suite.run("TC-L-006","insert: size se incrementa a 1", _t_insert_ok)
+    def test_list_destroy_empty(self):
+        """[Límite Inferior] Destruir una lista vacía."""
+        lst = list_create()
+        ret = list_destroy(lst)
+        self.assertEqual(ret, LIST_OK)
 
-def _t_insert_fifo():
-    l = list_create()
-    for v in [10,20,30]: list_insert(l, v)
-    for i,v in enumerate([10,20,30]):
-        _, got = list_get(l, i); assert_equal(got, v)
-suite.run("TC-L-007","insert múltiple: orden FIFO preservado", _t_insert_fifo)
+    def test_list_destroy_none(self):
+        """[Clase Inválida] Pasar None como parámetro."""
+        ret = list_destroy(None)
+        self.assertEqual(ret, LIST_NULL_PTR)
 
-suite.run("TC-L-008","insert: None → LIST_NULL_PTR",
-    lambda: assert_equal(list_insert(None, 5), LIST_NULL_PTR))
+    def test_list_destroy_clears_nodes(self):
+        """[Estado Interno] Verifica que los nodos queden en None tras destrucción."""
+        lst = list_create()
+        list_insert(lst, 10)
+        list_destroy(lst)
+        self.assertIsNone(lst._head)
+        self.assertIsNone(lst._tail)
+        self.assertEqual(lst.size, 0)
 
-def _t_insert_extremos():
-    l = list_create()
-    list_insert(l, INT_MIN); list_insert(l, INT_MAX)
-    _, v0 = list_get(l,0); _, v1 = list_get(l,1)
-    assert_equal(v0, INT_MIN); assert_equal(v1, INT_MAX)
-suite.run("TC-L-009","insert: INT_MIN e INT_MAX", _t_insert_extremos)
+    def test_list_destroy_idempotent(self):
+        """[Caso Especial] Destruir repetidas veces la misma lista."""
+        lst = list_create()
+        list_destroy(lst)
+        ret = list_destroy(lst)
+        self.assertEqual(ret, LIST_OK)
 
-def _t_insert_cero():
-    l = list_create(); list_insert(l, 0)
-    _, v = list_get(l,0); assert_equal(v, 0)
-suite.run("TC-L-010","insert: valor 0 (límite inferior)", _t_insert_cero)
+class TestListInsert(unittest.TestCase):
+    def test_list_insert_valid(self):
+        """[Clase Válida] Inserción simple de un elemento."""
+        lst = list_create()
+        ret = list_insert(lst, 42)
+        self.assertEqual(ret, LIST_OK)
+        self.assertEqual(lst.size, 1)
 
-def _t_insert_negativo():
-    l = list_create(); list_insert(l, -999)
-    _, v = list_get(l,0); assert_equal(v, -999)
-suite.run("TC-L-011","insert: valor negativo almacenado correctamente", _t_insert_negativo)
+    def test_list_insert_none(self):
+        """[Clase Inválida] Inserción en parámetro None."""
+        ret = list_insert(None, 42)
+        self.assertEqual(ret, LIST_NULL_PTR)
 
-# ── list_get ────────────────────────────────────────────────
-def _t_get_pos0():
-    l = list_create(); list_insert(l, 77)
-    code, val = list_get(l, 0)
-    assert_equal(code, LIST_OK); assert_equal(val, 77)
-suite.run("TC-L-012","get: pos=0 retorna valor correcto", _t_get_pos0)
+    def test_list_insert_multiple(self):
+        """[Clase Válida] Inserción de múltiples elementos en orden."""
+        lst = list_create()
+        list_insert(lst, 1)
+        list_insert(lst, 2)
+        list_insert(lst, 3)
+        self.assertEqual(lst.size, 3)
+        self.assertEqual(lst._tail.data, 3)
 
-def _t_get_last():
-    l = list_create()
-    for v in [1,2,3]: list_insert(l,v)
-    code, val = list_get(l, 2)
-    assert_equal(code, LIST_OK); assert_equal(val, 3)
-suite.run("TC-L-013","get: pos=size-1 retorna último elemento", _t_get_last)
+    def test_list_insert_negative(self):
+        """[Caso Especial] Inserción de un número negativo."""
+        lst = list_create()
+        list_insert(lst, -99)
+        self.assertEqual(lst._head.data, -99)
 
-def _t_get_oob_over():
-    l = list_create(); list_insert(l, 10)
-    code, val = list_get(l, 1)
-    assert_equal(code, LIST_OUT_OF_BOUNDS); assert_true(val is None)
-suite.run("TC-L-014","get: pos==size → OUT_OF_BOUNDS", _t_get_oob_over)
+    def test_list_insert_large_value(self):
+        """[Límite Superior] Inserción de un valor extremo simulado (INT_MAX)."""
+        lst = list_create()
+        val = 2147483647
+        list_insert(lst, val)
+        self.assertEqual(lst._head.data, val)
 
-def _t_get_oob_neg():
-    l = list_create(); list_insert(l, 10)
-    code, _ = list_get(l, -1)
-    assert_equal(code, LIST_OUT_OF_BOUNDS)
-suite.run("TC-L-015","get: pos==-1 → OUT_OF_BOUNDS", _t_get_oob_neg)
+class TestListRemove(unittest.TestCase):
+    def setUp(self):
+        self.lst = list_create()
+        list_insert(self.lst, 10)
+        list_insert(self.lst, 20)
+        list_insert(self.lst, 30)
 
-suite.run("TC-L-016","get: None → LIST_NULL_PTR",
-    lambda: assert_equal(list_get(None, 0)[0], LIST_NULL_PTR))
+    def test_list_remove_middle(self):
+        """[Clase Válida] Remover el elemento central."""
+        ret = list_remove(self.lst, 1)
+        self.assertEqual(ret, LIST_OK)
+        self.assertEqual(self.lst.size, 2)
 
-def _t_get_empty():
-    l = list_create(); code, _ = list_get(l, 0)
-    assert_equal(code, LIST_OUT_OF_BOUNDS)
-suite.run("TC-L-017","get: lista vacía → OUT_OF_BOUNDS", _t_get_empty)
+    def test_list_remove_none(self):
+        """[Clase Inválida] Remover usando parámetro None."""
+        ret = list_remove(None, 0)
+        self.assertEqual(ret, LIST_NULL_PTR)
 
-# ── list_remove ─────────────────────────────────────────────
-def _t_remove_head():
-    l = list_create()
-    for v in [10,20,30]: list_insert(l,v)
-    assert_equal(list_remove(l,0), LIST_OK)
-    assert_equal(list_size(l), 2)
-    _, v0 = list_get(l,0); assert_equal(v0, 20)
-suite.run("TC-L-018","remove: pos=0 actualiza head", _t_remove_head)
+    def test_list_remove_out_of_bounds_negative(self):
+        """[Límite Inferior] Remover índice negativo."""
+        ret = list_remove(self.lst, -1)
+        self.assertEqual(ret, LIST_OUT_OF_BOUNDS)
 
-def _t_remove_tail():
-    l = list_create()
-    for v in [10,20,30]: list_insert(l,v)
-    assert_equal(list_remove(l,2), LIST_OK)
-    assert_equal(list_size(l), 2)
-    _, v1 = list_get(l,1); assert_equal(v1, 20)
-suite.run("TC-L-019","remove: pos=size-1 actualiza tail", _t_remove_tail)
+    def test_list_remove_out_of_bounds_upper(self):
+        """[Límite Superior] Remover índice igual o mayor al tamaño."""
+        ret = list_remove(self.lst, 3)
+        self.assertEqual(ret, LIST_OUT_OF_BOUNDS)
 
-def _t_remove_mid():
-    l = list_create()
-    for v in [10,20,30]: list_insert(l,v)
-    list_remove(l,1)
-    _, v0 = list_get(l,0); _, v1 = list_get(l,1)
-    assert_equal(v0,10); assert_equal(v1,30)
-suite.run("TC-L-020","remove: pos media reenlaza correctamente", _t_remove_mid)
+    def test_list_remove_head_and_tail(self):
+        """[Caso Especial] Remover inicio y luego el final."""
+        list_remove(self.lst, 0)
+        self.assertEqual(self.lst._head.data, 20)
+        list_remove(self.lst, 1)
+        self.assertEqual(self.lst._tail.data, 20)
+        self.assertEqual(self.lst.size, 1)
 
-suite.run("TC-L-021","remove: pos>=size → OUT_OF_BOUNDS",
-    lambda: assert_equal(list_remove((lambda l:(list_insert(l,5),l)[1])(list_create()),1), LIST_OUT_OF_BOUNDS))
+class TestListClear(unittest.TestCase):
+    def test_list_clear_populated(self):
+        """[Clase Válida] Limpiar lista poblada."""
+        lst = list_create()
+        list_insert(lst, 1)
+        list_clear(lst)
+        self.assertEqual(lst.size, 0)
 
-suite.run("TC-L-022","remove: pos<0 → OUT_OF_BOUNDS",
-    lambda: assert_equal(list_remove((lambda l:(list_insert(l,5),l)[1])(list_create()),-1), LIST_OUT_OF_BOUNDS))
+    def test_list_clear_empty(self):
+        """[Límite Inferior] Limpiar lista que ya estaba vacía."""
+        lst = list_create()
+        ret = list_clear(lst)
+        self.assertEqual(ret, LIST_OK)
 
-suite.run("TC-L-023","remove: None → LIST_NULL_PTR",
-    lambda: assert_equal(list_remove(None,0), LIST_NULL_PTR))
+    def test_list_clear_none(self):
+        """[Clase Inválida] Limpiar con parámetro None."""
+        ret = list_clear(None)
+        self.assertEqual(ret, LIST_NULL_PTR)
 
-def _t_remove_single():
-    l = list_create(); list_insert(l,99)
-    list_remove(l,0); assert_equal(list_size(l), 0)
-suite.run("TC-L-024","remove: único elemento → lista vacía", _t_remove_single)
+    def test_list_clear_node_state(self):
+        """[Estado Interno] Verificación de punteros en NULL tras limpieza."""
+        lst = list_create()
+        list_insert(lst, 1)
+        list_clear(lst)
+        self.assertIsNone(lst._head)
+        self.assertIsNone(lst._tail)
 
-# ── list_size ────────────────────────────────────────────────
-suite.run("TC-L-025","size: lista nueva == 0",
-    lambda: assert_equal(list_size(list_create()), 0))
+    def test_list_clear_insert_after(self):
+        """[Caso Especial] Inserción en lista recién limpiada."""
+        lst = list_create()
+        list_insert(lst, 1)
+        list_clear(lst)
+        list_insert(lst, 2)
+        self.assertEqual(lst.size, 1)
+        self.assertEqual(lst._head.data, 2)
 
-def _t_size_5():
-    l = list_create()
-    for i in range(5): list_insert(l,i)
-    assert_equal(list_size(l), 5)
-suite.run("TC-L-026","size: tras 5 inserts == 5", _t_size_5)
+class TestListGet(unittest.TestCase):
+    def setUp(self):
+        self.lst = list_create()
+        list_insert(self.lst, 100)
+        list_insert(self.lst, 200)
 
-def _t_size_after_remove():
-    l = list_create()
-    for v in [1,2,3]: list_insert(l,v)
-    list_remove(l,0); assert_equal(list_size(l), 2)
-suite.run("TC-L-027","size: tras insert+remove consistente", _t_size_after_remove)
+    def test_list_get_valid(self):
+        """[Clase Válida] Obtener un valor existente."""
+        code, val = list_get(self.lst, 1)
+        self.assertEqual(code, LIST_OK)
+        self.assertEqual(val, 200)
 
-suite.run("TC-L-028","size: None → LIST_NULL_PTR",
-    lambda: assert_equal(list_size(None), LIST_NULL_PTR))
+    def test_list_get_none(self):
+        """[Clase Inválida] Obtener usando None."""
+        code, val = list_get(None, 0)
+        self.assertEqual(code, LIST_NULL_PTR)
 
-def _t_size_after_clear():
-    l = list_create()
-    for i in range(3): list_insert(l,i)
-    list_clear(l); assert_equal(list_size(l), 0)
-suite.run("TC-L-029","size: tras clear == 0", _t_size_after_clear)
+    def test_list_get_negative_pos(self):
+        """[Límite Inferior] Obtener con índice negativo."""
+        code, val = list_get(self.lst, -5)
+        self.assertEqual(code, LIST_OUT_OF_BOUNDS)
 
-# ── list_contains ────────────────────────────────────────────
-def _t_contains_true():
-    l = list_create()
-    for v in [10,20,30]: list_insert(l,v)
-    assert_equal(list_contains(l,20), 1)
-suite.run("TC-L-030","contains: valor presente → 1 (TRUE)", _t_contains_true)
+    def test_list_get_out_of_bounds(self):
+        """[Límite Superior] Obtener con índice fuera de rango."""
+        code, val = list_get(self.lst, 2)
+        self.assertEqual(code, LIST_OUT_OF_BOUNDS)
 
-def _t_contains_false():
-    l = list_create()
-    for v in [10,20,30]: list_insert(l,v)
-    assert_equal(list_contains(l,99), 0)
-suite.run("TC-L-031","contains: valor ausente → 0 (FALSE)", _t_contains_false)
+    def test_list_get_empty_list(self):
+        """[Caso Especial] Obtener desde una lista vacía."""
+        empty_lst = list_create()
+        code, val = list_get(empty_lst, 0)
+        self.assertEqual(code, LIST_OUT_OF_BOUNDS)
 
-def _t_contains_empty():
-    l = list_create()
-    assert_equal(list_contains(l,5), 0)
-    assert_equal(list_size(l), 0)
-suite.run("TC-L-032","contains: lista vacía → 0 (no error)", _t_contains_empty)
+class TestListSize(unittest.TestCase):
+    def test_list_size_empty(self):
+        """[Límite Inferior] Tamaño de lista vacía."""
+        lst = list_create()
+        self.assertEqual(list_size(lst), 0)
 
-suite.run("TC-L-033","contains: None → LIST_NULL_PTR",
-    lambda: assert_equal(list_contains(None,5), LIST_NULL_PTR))
+    def test_list_size_populated(self):
+        """[Clase Válida] Tamaño tras inserciones."""
+        lst = list_create()
+        list_insert(lst, 1)
+        self.assertEqual(list_size(lst), 1)
 
-def _t_contains_intmin():
-    l = list_create(); list_insert(l, INT_MIN)
-    assert_equal(list_contains(l, INT_MIN), 1)
-suite.run("TC-L-034","contains: INT_MIN presente → TRUE", _t_contains_intmin)
+    def test_list_size_none(self):
+        """[Clase Inválida] Tamaño con parámetro None."""
+        self.assertEqual(list_size(None), LIST_NULL_PTR)
 
-def _t_contains_intmax_false():
-    l = list_create(); list_insert(l, 0)
-    assert_equal(list_contains(l, INT_MAX), 0)
-suite.run("TC-L-035","contains: INT_MAX ausente → FALSE", _t_contains_intmax_false)
+    def test_list_size_after_insert(self):
+        """[Estado Transicional] Incremento progresivo de tamaño."""
+        lst = list_create()
+        list_insert(lst, 1)
+        list_insert(lst, 2)
+        self.assertEqual(list_size(lst), 2)
 
-# ── list_clear ───────────────────────────────────────────────
-def _t_clear_ok():
-    l = list_create()
-    for v in [1,2,3,4,5]: list_insert(l,v)
-    assert_equal(list_clear(l), LIST_OK)
-    assert_equal(list_size(l), 0)
-suite.run("TC-L-036","clear: vacía la lista completamente", _t_clear_ok)
+    def test_list_size_after_remove(self):
+        """[Estado Transicional] Decremento progresivo de tamaño."""
+        lst = list_create()
+        list_insert(lst, 1)
+        list_remove(lst, 0)
+        self.assertEqual(list_size(lst), 0)
 
-def _t_clear_empty():
-    l = list_create()
-    assert_equal(list_clear(l), LIST_OK)
-    assert_equal(list_size(l), 0)
-suite.run("TC-L-037","clear: lista ya vacía → LIST_OK (idempotente)", _t_clear_empty)
+class TestListContains(unittest.TestCase):
+    def setUp(self):
+        self.lst = list_create()
+        list_insert(self.lst, 55)
+        list_insert(self.lst, 66)
 
-suite.run("TC-L-038","clear: None → LIST_NULL_PTR",
-    lambda: assert_equal(list_clear(None), LIST_NULL_PTR))
+    def test_list_contains_true(self):
+        """[Clase Válida] Buscar elemento existente."""
+        self.assertEqual(list_contains(self.lst, 66), 1)
 
-def _t_clear_reuse():
-    l = list_create()
-    for v in [1,2,3]: list_insert(l,v)
-    list_clear(l); list_insert(l,99)
-    assert_equal(list_size(l),1)
-    _, val = list_get(l,0); assert_equal(val,99)
-suite.run("TC-L-039","clear + insert: lista reusable tras limpiar", _t_clear_reuse)
+    def test_list_contains_false(self):
+        """[Clase Válida] Buscar elemento no existente."""
+        self.assertEqual(list_contains(self.lst, 99), 0)
 
-def _t_clear_twice():
-    l = list_create(); list_insert(l,42)
-    list_clear(l)
-    assert_equal(list_clear(l), LIST_OK)
-    assert_equal(list_size(l), 0)
-suite.run("TC-L-040","clear doble: sin crash, size == 0", _t_clear_twice)
+    def test_list_contains_none(self):
+        """[Clase Inválida] Buscar en lista None."""
+        self.assertEqual(list_contains(None, 55), LIST_NULL_PTR)
 
-# ── Reporte ──────────────────────────────────────────────────
-if __name__ == "__main__":
-    sys.exit(1 if suite.report() > 0 else 0)
+    def test_list_contains_empty(self):
+        """[Límite Inferior] Buscar en lista vacía."""
+        empty_lst = list_create()
+        self.assertEqual(list_contains(empty_lst, 55), 0)
+
+    def test_list_contains_duplicates(self):
+        """[Caso Especial] Buscar cuando el valor está duplicado."""
+        list_insert(self.lst, 55)
+        self.assertEqual(list_contains(self.lst, 55), 1)
+
+if __name__ == '__main__':
+    unittest.main()
